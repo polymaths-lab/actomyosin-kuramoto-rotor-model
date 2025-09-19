@@ -6,11 +6,10 @@
 # The key parameters to adjust are: 
 
 # 1) switch - this changes how the rotors' force is calculated to make them less backdrivable. This *can not* be turned off when looking for oscillatory motion, only unidirectional.
-# 2) smooth - this changes how rotor-tooth contact is handled, applying a damping effect to rotors as they approach teeth, rather than enforcing an immediate velocity 
-#             constraint. This can help with numerical stability and convergence in some scenarios.
-# 3) events - this turns on the event framework that detects when a rotor contacts a tooth and enforces the coupling constraint. 
+#
+# 2) events - this turns on the event framework that detects when a rotor contacts a tooth and enforces the coupling constraint. 
 #             This will make the solver slower, but is effective.
-# 4) solver tolerances and dtmax - Making these smaller will increase accuracy, but also typically increase solve time.
+# 3) solver tolerances and dtmax - Making these smaller will increase accuracy, but also typically increase solve time.
 
 # I'd avoid turning on both smooth and events at the same time, as this confuse the solver.
 
@@ -34,22 +33,22 @@ using ProgressLogging
 using FFTW
 GLMakie.activate!();
 
-# alpha is viscous resistance, beta is auxotonix boundary constraint, gamma is isotonic force. Don't change switch, its a legacy parameter. 
+# alpha is viscous resistance, beta is auxotonix boundary constraint, gamma is isotonic force.
 
-alpha = 1;
+alpha = 2;
 beta = 0.00;
-gamma = 10;
+gamma = 5;
 
 # If you're struggling to get the solver to work and you're only interested in unidirectional motion, try changing switch from 0 to 1. 
 # It changes how the rotors' force is calculated to make them less backdrivable, which creates fewer runaway events. This *can not* be 
 # turned off when looking for oscillatory motion. Switch can be increased to up to 10 or so for very low alpha, high gamma, effectively 
 # prventing the backbone moving in reverse.
 
-switch = 7;
+switch = 0;
 
-# Events  and smooth may make the system solve, but it will take much much longer. Leave these both as false if you can. Events are better but slower than smooth.
-smooth = false;
-events = true;
+# Events may make the system solve, but it will take much much longer. Leave this as false if you can. 
+
+events = false;
 
 # StS is the same as `c' in the paper. This must be between 0 and 1 and represents the range of oscillator contact. Probably don't make it 1, as you'll end up dividing by zero.
 
@@ -515,4 +514,5 @@ lines!(ax4, uvals[1, 1:1:end], G_phase_error[1:1:end])
 
 
  display(fig1)
+
 
