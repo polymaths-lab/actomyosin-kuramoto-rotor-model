@@ -1,4 +1,3 @@
-
 # ------------------- READ ME---------------------
 # This is the Julia code for the Dynamic Coupling Rotor (DCR) model of muscle contraction, as described in the manuscript.
 # The model is replete with discontinuities, non-linearities and stiff equations, making it a challenging numerical problem.
@@ -31,6 +30,8 @@ using Sundials
 using ProgressLogging
 using FFTW
 GLMakie.activate!();
+using Profile
+using InteractiveUtils
 
 # alpha is viscous resistance, beta is auxotonix boundary constraint, gamma is isotonic force.
 
@@ -61,7 +62,7 @@ tooth_per = 7.8*StS
 # Number of rotors/motors and the time (time is dimensionless and measured as a function of the natural period of an oscillator)
 
 rot_num = 100;
-time = 200;
+time = 400;
 
 
 
@@ -178,69 +179,6 @@ function f2(out, du, u, p, t)
 
 end
 
-#f2_smooth is a modified version of f2 that applies a damping effect to rotors as they approach teeth, rather than enforcing an immediate velocity constraint. This can help with numerical stability and convergence in some scenarios.
-
-function f2_smooth(out, du, u, p, t)
-    alpha = p[1]
-    beta = p[2] 
-    StS = p[4]
-    rot_per = p[5]
-    tooth_per = p[6]
-    rot_num = Int(p[7])
-    gamma = p[8]
-
-    tooth_num = Int(ceil((rot_num*rot_per)/tooth_per));
-    tooth_orig_x = zeros(tooth_num);
-    tooth_loc_x = zeros(tooth_num);
-    tooth_loc_ind = zeros(tooth_num);
-    @inbounds for j = 1:tooth_num
-        tooth_orig_x[j] = j*tooth_per - tooth_per;
-        tooth_loc_x[j] = tooth_orig_x[j] + u[1];
-        tooth_loc_ind[j] = mod(tooth_loc_x[j], tooth_per*tooth_num);
-    end
-
-    
-    rot_forces = zeros(rot_num)
-    
-    @inbounds for i = 1:rot_num
-        # Calculate proximity to nearest tooth
-        min_distance = Inf
-        in_contact = false
-        
-        if H(u[i+1], StS) == 1
-            @inbounds for j = 1:tooth_num
-                distance = abs(tooth_loc_ind[j] - ((i-1)*rot_per + sin(-u[i+1])))
-                min_distance = min(min_distance, distance)
-                
-                if distance < 0.02
-                    in_contact = true
-                    # Rotor is in contact - enforce coupling constraint
-                    out[i+1] = du[1]/abs(cos(u[i+1])) - du[i+1]
-                    break
-                end
-            end
-        end
-        
-        if !in_contact
-            # Apply proximity-based damping for approaching rotors
-            target_velocity = 2*pi
-            if H(u[i+1], StS) == 1 && min_distance < 0.05  # Buffer zone
-                damping_factor = min_distance / 0.1  # 0 at contact, 1 at buffer edge
-                target_velocity = 2*pi * (0.3 + 0.7 * damping_factor)  # Slow to 30% of normal
-            end
-            
-            out[i+1] = target_velocity - du[i+1]
-        end
-        
-        # Calculate forces
-        atten = (du[i+1]/(2*pi))*(0.5*tanh(-40*du[i+1])+0.5)
-        rot_forces[i] = ((1 - du[i+1]/(2*pi))+atten)*abs(cos(u[i+1]))*H(u[i+1], StS)
-    end
-    
-    # Backbone equation
-    spring = beta
-    out[1] = sum(rot_forces) - alpha*du[1] - spring*(u[1]) - gamma*(0.5*tanh(2*(u[1]-1.3))+0.5)
-end
 
 function condition1_safe(out, u, t, integrator)
     try
@@ -323,8 +261,7 @@ end
 
 
 
-#VCC is the event framework. It exists to detect when a rotor contacts a tooth and enforce the coupling constraint. This can often cause more trouble than it's worth. Try 
-# running f2_smooth without the callback if you're having trouble getting the solver to work.
+#VCC is the event framework. It exists to detect when a rotor contacts a tooth and enforce the coupling constraint. 
 
 #cb = VectorContinuousCallback(condition1, affect!, rot_num)#, terminate_integrator = false);
 cb = VectorContinuousCallback(condition1_safe, affect_safe!, rot_num,
@@ -347,15 +284,15 @@ end
 
 # These are the rotor initial conditions the options for u0 are zerod, pre organised and random
 
-u0 = zeros(rot_num+1);
-du0 = zeros(rot_num+1);
+u0 = zeros(Float64, rot_num+1);
+du0 = zeros(Float64, rot_num+1);
 
-#phase_diff = -0.2*2*pi
+
 
 for i = 1:rot_num
     du0[i+1] = 2*pi;
 
-    #u0[i+1] = 0;
+    #u0[i+1] = 0.0;
     #u0[i+1] = mod(i*phase_diff, 2*pi);
     u0[i+1] = rand()*2*pi
 end
@@ -377,41 +314,42 @@ end
 
 # The numerical framework
 
-tspan = (0.0, time)
+tspan = (0.0, Float64(time))
 debug_cb = DiscreteCallback((u,t,integrator) -> mod(t, 0.1) < integrator.dt, 
                            debug_callback, save_positions=(true,true))
 
-differential_vars = zeros(rot_num+1)
+differential_vars = trues(rot_num+1)
 
-@inbounds for i = 1:rot_num+1
-    differential_vars[i] = true;
-end
+
 
 println("Starting integration with ", rot_num, " rotors")
 println("Time span: ", tspan)
 
 # P is the parameter tuple
-p = (alpha, beta, switch, StS, rot_per, tooth_per, rot_num, gamma);
+p = (Float64(alpha), Float64(beta), Float64(switch), Float64(StS), Float64(rot_per), Float64(tooth_per), Float64(rot_num), Float64(gamma));
 
-
+function simulate(p::Tuple, u0::Vector{Float64}, du0::Vector{Float64}, 
+                  tspan::Tuple{Float64, Float64}, 
+                  differential_vars::Vector{Bool},
+                  cb, debug_cb, events::Bool)
     
 
-prob_smooth = DAEProblem(f2_smooth, du0, u0, tspan, p, differential_vars = differential_vars)
-prob = DAEProblem(f2, du0, u0, tspan, p, differential_vars = differential_vars)
-combined_cb = CallbackSet(cb, debug_cb)
+    prob = DAEProblem(f2, du0, u0, tspan, p, differential_vars = differential_vars)
+    combined_cb = CallbackSet(cb, debug_cb)
 
-if smooth == true
-    prob = prob_smooth
+
+    if events == false
+        sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
+    else
+        sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7, callback=combined_cb,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
+    end
+
+
+    return sol
 end
 
-if events == false
-    sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7, progress=true, progress_steps=1)
-else
-    sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7, callback=combined_cb,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7, progress=true, progress_steps=1)
-end
 
-
-
+sol = simulate(p, u0, du0, tspan, differential_vars, cb, debug_cb, events);
 # The rest of this is just various ways to manipulate the data and show some of the results.
 
 
