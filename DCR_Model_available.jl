@@ -37,7 +37,7 @@ using InteractiveUtils
 
 alpha = 2;
 beta = 0.00;
-gamma = 2;
+gamma = 3;
 
 # If you're struggling to get the solver to work and you're only interested in unidirectional motion, try changing switch from 0 to 1. 
 # It changes how the rotors' force is calculated to make them less backdrivable, which creates fewer runaway events. This *can not* be 
@@ -62,7 +62,7 @@ tooth_per = 7.8*StS
 # Number of rotors/motors and the time (time is dimensionless and measured as a function of the natural period of an oscillator)
 
 rot_num = 100;
-time = 400;
+time = 100;
 
 
 
@@ -328,28 +328,21 @@ println("Time span: ", tspan)
 # P is the parameter tuple
 p = (Float64(alpha), Float64(beta), Float64(switch), Float64(StS), Float64(rot_per), Float64(tooth_per), Float64(rot_num), Float64(gamma));
 
-function simulate(p::Tuple, u0::Vector{Float64}, du0::Vector{Float64}, 
-                  tspan::Tuple{Float64, Float64}, 
-                  differential_vars::Vector{Bool},
-                  cb, debug_cb, events::Bool)
     
 
-    prob = DAEProblem(f2, du0, u0, tspan, p, differential_vars = differential_vars)
-    combined_cb = CallbackSet(cb, debug_cb)
+prob = DAEProblem(f2, du0, u0, tspan, p, differential_vars = differential_vars)
+combined_cb = CallbackSet(cb, debug_cb)
 
 
-    if events == false
-        sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
-    else
-        sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7, callback=combined_cb,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
-    end
-
-
-    return sol
+if events == false
+    sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
+else
+    sol = solve(prob, IDA(linear_solver  = :LapackDense), maxiters = 10^7, callback=combined_cb,  dtmax = 1e-4, reltol = 1e-7, abstol = 1e-7,  initializealg = BrownFullBasicInit(), progress=true, progress_steps=1)
 end
 
 
-sol = simulate(p, u0, du0, tspan, differential_vars, cb, debug_cb, events);
+
+
 # The rest of this is just various ways to manipulate the data and show some of the results.
 
 
@@ -451,6 +444,4 @@ lines!(ax4, uvals[1, 1:1:end], G_phase_error[1:1:end])
 
 
  display(fig1)
-
-
 
